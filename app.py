@@ -5,13 +5,8 @@ import numpy as np
 from datetime import datetime
 
 # ==========================================
-# CONFIGURACIÓN DEL BOT (PARÁMETROS PRO)
+# CONFIGURACIÓN DEL UNIVERSO
 # ==========================================
-CAPITAL_TOTAL = 5483.14
-EFECTIVO_ACTUAL = 737.63  # Tu saldo actual en GBM Trading US
-Z_UMBRAL = 1.65           # Confianza estadística (90%)
-
-# Universo de 100+ Tickers (Tech, Energía, Salud, Consumo, Metales)
 TICKERS = [
     "NVDA","MU","META","MSFT","GOOGL","AMZN","AAPL","ASML","TSM","AVGO","PLTR","PANW","VRT","AMD","NFLX","CRM","ADBE","ORCL","CSCO",
     "JPM","BAC","GS","MS","V","MA","PYPL","AXP","BLK","VST","CEG","XOM","CVX","CCJ","SMR","SLB","MPC","PSX","LLY","NVO","UNH",
@@ -19,13 +14,27 @@ TICKERS = [
     "AVAV","GOLD","NEM","FCX","FTNT","OKTA","S","NET","ZS","CRWD","TSLA","HOOD","COIN","MSTR","DDOG","SNOW","AMAT","KLAC","LRCX"
 ]
 
-# Configuración de la página
-st.set_page_config(page_title="Bot Alta Convicción v1.0", layout="wide")
+st.set_page_config(page_title="Bot Alta Convicción v1.1", layout="wide")
 
 # ==========================================
-# FUNCIONES MATEMÁTICAS
+# PANEL DE CONTROL (SIDEBAR)
 # ==========================================
-@st.cache_data(ttl=3600) # Guarda los datos por 1 hora para no banear la IP
+st.sidebar.header("⚙️ Configuración de Capital")
+efectivo_real = st.sidebar.number_input("Efectivo disponible hoy ($)", min_value=10.0, value=737.63, step=10.0)
+z_umbral = st.sidebar.slider("Umbral de Convicción (Z-Score)", 1.0, 2.5, 1.65)
+
+st.sidebar.markdown("---")
+st.sidebar.header("Reglas de Salida")
+st.sidebar.info("""
+1. **Stop Loss:** -5%
+2. **Take Profit:** +8%
+3. **Tiempo:** 10 días máx.
+""")
+
+# ==========================================
+# MOTOR DE CÁLCULO
+# ==========================================
+@st.cache_data(ttl=3600)
 def descargar_datos(lista_tickers):
     data = yf.download(lista_tickers, period="2y", interval="1d", group_by='column', auto_adjust=True)
     return data['Close']
@@ -36,81 +45,63 @@ def procesar_senales(precios):
         try:
             serie = precios[t].dropna()
             if len(serie) < 100: continue
-            
-            # Retornos y Probabilidad Laplace
             ret = serie.pct_change()
             exitos_hist = (ret.shift(-1) > 0).astype(int).iloc[:-1]
             p_win = exitos_hist.mean()
             p_laplace = (p_win * len(exitos_hist) + 2) / (len(exitos_hist) + 4)
-            
-            # Z-Score de la Probabilidad (Anomalía Estadística)
             p_movil = exitos_hist.rolling(60).mean().dropna()
             z_score = (p_laplace - p_movil.mean()) / p_movil.std()
-            
-            # Volatilidad Anualizada (para tamaño de posición)
             vol = ret.tail(20).std() * np.sqrt(252)
             
             resultados.append({
-                "Ticker": t,
-                "Precio": serie.iloc[-1],
-                "Z-Score": z_score,
-                "Prob": p_laplace,
-                "Volatilidad": vol
+                "Ticker": t, "Precio": serie.iloc[-1], "Z-Score": z_score, "Prob": p_laplace, "Volatilidad": vol
             })
-        except:
-            continue
+        except: continue
     return pd.DataFrame(resultados)
 
 # ==========================================
-# INTERFAZ DE USUARIO (UI)
+# INTERFAZ PRINCIPAL
 # ==========================================
-st.title("🤖 Bot de Alta Convicción v1.0")
-st.markdown(f"**Capital de Trabajo:** ${CAPITAL_TOTAL} USD | **Efectivo en GBM:** ${EFECTIVO_ACTUAL} USD")
+st.title("🤖 Bot de Alta Convicción v1.1")
+st.markdown(f"**Estrategia:** Arbitraje Estadístico | **Distribución:** Risk-Parity Dinámico")
 
-if st.button("🚀 Escanear Oportunidades"):
-    with st.spinner("Analizando 100+ acciones..."):
+if st.button("🚀 Escanear y Calcular Inversión"):
+    with st.spinner("Descargando datos y ajustando pesos de cartera..."):
         df_precios = descargar_datos(TICKERS)
         df_final = procesar_senales(df_precios)
         
-        # Regla de Clasificación
-        def definir_recomendacion(row):
-            if row['Z-Score'] > Z_UMBRAL: return "🔥 COMPRA FUERTE"
-            if row['Prob'] > 0.60: return "✅ COMPRA"
-            if row['Prob'] < 0.40: return "❌ VENTA"
-            return "➖ HOLD"
+        # Clasificación con el Z-Score del Sidebar
+        df_final['Señal'] = np.where(df_final['Z-Score'] > z_umbral, "🔥 COMPRA FUERTE", 
+                            np.where(df_final['Prob'] > 0.60, "✅ COMPRA", 
+                            np.where(df_final['Prob'] < 0.40, "❌ VENTA", "➖ HOLD")))
         
-        df_final['Señal'] = df_final.apply(definir_recomendacion, axis=1)
-        
-        # Cálculo de Inversión Sugerida (Ajustada por Volatilidad)
-        df_final['Inversión $'] = (200 / (df_final['Volatilidad'] * 5)).clip(75, 300)
-        
-        # Filtrar solo compras y ordenar por el mejor Z-Score
-        compras = df_final[df_final['Señal'].str.contains("COMPRA")].sort_values("Z-Score", ascending=False)
+        compras = df_final[df_final['Señal'].str.contains("COMPRA")].copy()
         
         if not compras.empty:
-            # Semáforo de Efectivo
-            compras['Acumulado $'] = compras['Inversión $'].cumsum()
-            compras['¿Alcanza?'] = np.where(compras['Acumulado $'] <= EFECTIVO_ACTUAL, "🟢 SÍ", "🔴 NO")
+            # --- CÁLCULO DE LA CALCULADORA REAL ---
+            # Peso basado en la inversa de la volatilidad (A menos riesgo, más dinero)
+            compras['Inversa_Vol'] = 1 / compras['Volatilidad']
+            suma_inversas = compras['Inversa_Vol'].sum()
             
-            st.success(f"Análisis completado. Se detectaron {len(compras)} señales.")
+            # Aquí ocurre la magia: Usamos el 'efectivo_real' del Sidebar
+            compras['Inversión $'] = (compras['Inversa_Vol'] / suma_inversas) * efectivo_real
             
-            # Mostrar Tabla Principal
-            columnas_ver = ['Ticker', 'Señal', 'Z-Score', 'Prob', 'Inversión $', '¿Alcanza?']
+            compras = compras.sort_values("Z-Score", ascending=False)
+            
+            st.success(f"Se detectaron {len(compras)} señales. Capital de ${efectivo_real} distribuido.")
+            
+            # Mostrar Tabla con formato profesional
             st.dataframe(
-                compras[columnas_ver].style.format({"Z-Score": "{:.2f}", "Prob": "{:.2%}", "Inversión $": "${:.2f}"})
-                .applymap(lambda x: 'color: green' if x == "🟢 SÍ" else ('color: red' if x == "🔴 NO" else ''), subset=['¿Alcanza?']),
-                use_container_width=True
+                compras[['Ticker', 'Señal', 'Z-Score', 'Inversión $', 'Precio']].style.format({
+                    "Z-Score": "{:.2f}", 
+                    "Inversión $": "${:.2f}",
+                    "Precio": "${:.2f}"
+                }), use_container_width=True
             )
+            
+            st.info(f"💡 **Instrucción:** Para mantener el riesgo balanceado, compra exactamente las cantidades sugeridas arriba.")
         else:
-            st.info("No hay señales de alta convicción en este momento. El mercado está en equilibrio.")
+            st.warning("No se encontraron señales. El capital se mantiene protegido en efectivo.")
 
-# Sidebar con recordatorios tácticos
-st.sidebar.header("Reglas de Salida")
-st.sidebar.info("""
-1. **Stop Loss:** -5% o -7% (según volatilidad).
-2. **Take Profit:** +10% o señal de VENTA del bot.
-3. **Tiempo:** Máximo 10 días en cartera.
-""")
-
-st.sidebar.write("---")
-st.sidebar.write(f"Última actualización: {datetime.now().strftime('%H:%M:%S')}")
+st.markdown("---")
+st.caption(f"Última corrida: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Universo: {len(TICKERS)} activos.")
