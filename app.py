@@ -11,7 +11,7 @@ from reportlab.lib.units import inch
 import io
 
 # ==========================================
-# UNIVERSO ESTRATÉGICO (110+ TICKERS)
+# CONFIGURACIÓN Y UNIVERSO
 # ==========================================
 TICKERS = [
     "NVDA","MU","META","MSFT","GOOGL","AMZN","AAPL","ASML","TSM","AVGO","PLTR","PANW","VRT","AMD","NFLX","CRM","ADBE","ORCL","CSCO",
@@ -20,33 +20,10 @@ TICKERS = [
     "AVAV","GOLD","NEM","FCX","FTNT","OKTA","S","NET","ZS","CRWD","TSLA","HOOD","COIN","MSTR","DDOG","SNOW","AMAT","KLAC","LRCX"
 ]
 
-st.set_page_config(page_title="Bot Alta Convicción v2.0 (5D)", layout="wide")
+st.set_page_config(page_title="Bot Alta Convicción v2.1", layout="wide")
 
 # ==========================================
-# GENERADOR DE MANUAL PDF (ACTUALIZADO 5D)
-# ==========================================
-def generar_pdf():
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('Title', parent=styles['Title'], fontSize=18, spaceAfter=20)
-    h1_style = ParagraphStyle('Heading1', parent=styles['Heading1'], fontSize=14, spaceBefore=15, color=colors.darkblue)
-    body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10, leading=12, alignment=4)
-    content = []
-    content.append(Paragraph("Manual de Usuario: Bot de Alta Convicción v2.0", title_style))
-    content.append(Paragraph("1. Filosofía de Horizonte 5-D", h1_style))
-    content.append(Paragraph("Este bot no busca el rebote de mañana. Busca la <b>Convicción Semanal</b>. Calcula la probabilidad de que en 5 días hábiles el precio sea superior al actual, filtrando el ruido del 'day-trading'.", body_style))
-    content.append(Paragraph("2. Reglas de Salida Estratégica", h1_style))
-    data = [["Regla", "Valor", "Lógica"], ["Stop Loss", "-5.0%", "Protección Capital"], ["Take Profit", "+8.0%", "Captura de Alpha"], ["Tiempo Máx", "10 Días", "Costo Oportunidad"]]
-    t = Table(data, colWidths=[1.2*inch, 1.2*inch, 2.6*inch])
-    t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.darkblue),('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),('GRID',(0,0),(-1,-1),0.5,colors.grey)]))
-    content.append(t)
-    doc.build(content)
-    buffer.seek(0)
-    return buffer
-
-# ==========================================
-# CEREBRO MATEMÁTICO (HORIZONTE 5 DÍAS)
+# MOTOR DE DATOS (HORIZONTE 5D)
 # ==========================================
 @st.cache_data(ttl=3600)
 def descargar_datos(lista_tickers):
@@ -55,29 +32,17 @@ def descargar_datos(lista_tickers):
 
 def procesar_senales_5d(precios, lista_tickers):
     resultados = []
-    HORIZONTE = 5 # Cambiamos de 1 a 5 días
-    
+    HORIZONTE = 5
     for t in lista_tickers:
         try:
             serie = precios[t].dropna()
             if len(serie) < 100: continue
-            
-            # --- LÓGICA DE ÉXITO SEMANAL ---
-            # Comparamos el precio de hoy contra el de hace 5 días (históricamente)
-            # Para Laplace, miramos si 'Precio en t+5' > 'Precio en t'
             ret_5d = serie.shift(-HORIZONTE) > serie
             exitos = ret_5d.dropna().astype(int)
-            
-            # Laplace
             p_laplace = (exitos.mean() * len(exitos) + 2) / (len(exitos) + 4)
-            
-            # Z-Score sobre la probabilidad móvil de 60 días
             p_movil = exitos.rolling(60).mean().dropna()
             z_score = (p_laplace - p_movil.mean()) / p_movil.std()
-            
-            # Volatilidad para Risk-Parity
             vol = serie.pct_change().tail(20).std() * np.sqrt(252)
-            
             resultados.append({
                 "Ticker": t, "Precio": serie.iloc[-1], "Z-Score": z_score, "Prob 5D": p_laplace, "Vol": vol
             })
@@ -85,21 +50,17 @@ def procesar_senales_5d(precios, lista_tickers):
     return pd.DataFrame(resultados)
 
 # ==========================================
-# INTERFAZ DE USUARIO
+# INTERFAZ Y LÓGICA DE INVERSIÓN PROTEGIDA
 # ==========================================
-st.sidebar.header("⚙️ Panel de Control v2.0")
+st.sidebar.header("⚙️ Configuración v2.1")
 efectivo_real = st.sidebar.number_input("Efectivo disponible ($)", value=737.63)
 z_umbral = st.sidebar.slider("Umbral de Convicción", 1.0, 2.5, 1.65)
 
-try:
-    st.sidebar.download_button("📄 Descargar Manual 5-D", data=generar_pdf(), file_name="Manual_Bot_5D.pdf", mime="application/pdf")
-except: pass
+st.title("🤖 Bot de Alta Convicción v2.1")
+st.markdown("**Modo:** Convicción Pesada (5-Días) | **Protección de Capital:** Activa")
 
-st.title("🤖 Bot de Alta Convicción v2.0")
-st.markdown("**Estrategia:** Weekly Mean Reversion | **Horizonte de Probabilidad:** 5 Días")
-
-if st.button("🚀 Escanear Convicción Semanal"):
-    with st.spinner("Analizando horizontes de 5 días en 110+ activos..."):
+if st.button("🚀 Escanear y Calcular Ejecución"):
+    with st.spinner("Escaneando anomalías..."):
         df_precios = descargar_datos(TICKERS)
         df_final = procesar_senales_5d(df_precios, TICKERS)
         
@@ -108,32 +69,41 @@ if st.button("🚀 Escanear Convicción Semanal"):
                             np.where(df_final['Prob 5D'] > 0.60, "✅ COMPRA", 
                             np.where(df_final['Prob 5D'] < 0.40, "❌ VENTA", "➖ HOLD")))
         
-        # PANEL DE DIAGNÓSTICO
-        st.subheader("🕵️ Panel de Diagnóstico Semanal (Top 10)")
-        top_diagnostico = df_final.sort_values("Z-Score", ascending=False).head(10)
-        st.dataframe(
-            top_diagnostico[['Ticker', 'Señal', 'Z-Score', 'Prob 5D', 'Precio']].style.format({
-                "Z-Score": "{:.2f}", "Prob 5D": "{:.2%}", "Precio": "${:.2f}"
-            }), use_container_width=True
-        )
-        
-        # ÓRDENES
+        # FILTRO DE COMPRAS
         compras = df_final[df_final['Señal'].str.contains("COMPRA")].copy()
+        
         if not compras.empty:
-            st.divider()
-            st.subheader("💰 Órdenes Sugeridas (Horizonte 5D)")
+            # --- NUEVA LÓGICA DE PROTECCIÓN ---
+            def calcular_multiplicador(z):
+                if z >= 1.65: return 1.0    # 100% de la apuesta
+                if z >= 1.0: return 0.60    # 60% de la apuesta
+                return 0.25                 # 25% de la apuesta (Señales débiles como GEV)
+
+            compras['Multiplicador'] = compras['Z-Score'].apply(calcular_multiplicador)
+            
+            # Reparto inicial por volatilidad
             compras['Inversa_Vol'] = 1 / compras['Vol']
-            compras['Inversión $'] = (compras['Inversa_Vol'] / compras['Inversa_Vol'].sum()) * efectivo_real
+            base_inv = (compras['Inversa_Vol'] / compras['Inversa_Vol'].sum()) * efectivo_real
+            
+            # Aplicar el freno de convicción
+            compras['Inversión $'] = base_inv * compras['Multiplicador']
             compras['Acciones (Qty)'] = (compras['Inversión $'] / compras['Precio']).apply(np.floor)
             
+            st.success(f"Se detectaron {len(compras)} señales con ponderación de riesgo.")
+            
+            # Mostrar Tabla de Ejecución
             st.dataframe(
                 compras[['Ticker', 'Señal', 'Z-Score', 'Inversión $', 'Acciones (Qty)', 'Precio']]
                 .sort_values("Z-Score", ascending=False)
                 .style.format({"Z-Score": "{:.2f}", "Inversión $": "${:.2f}", "Acciones (Qty)": "{:.0f}", "Precio": "${:.2f}"}),
                 use_container_width=True
             )
+            
+            # Resumen de efectivo
+            total_inv = compras['Inversión $'].sum()
+            st.info(f"💰 **Resumen de Operación:** Invertirás **${total_inv:.2f}** de tus **${efectivo_real:.2f}**. El resto se queda en reserva por baja convicción.")
         else:
-            st.warning("⚠️ Sin señales semanales de alta convicción. El mercado no muestra memoria de rebote a 5 días.")
+            st.warning("No hay señales hoy.")
 
 st.markdown("---")
-st.caption(f"Actualizado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Modo: Horizonte 5-Días")
+st.caption("v2.1 - Ahora con protección automática de capital ante señales débiles.")
