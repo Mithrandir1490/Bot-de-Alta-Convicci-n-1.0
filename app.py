@@ -11,7 +11,7 @@ from reportlab.lib.units import inch
 import io
 
 # ==========================================
-# UNIVERSO ESTRATÉGICO
+# UNIVERSO ESTRATÉGICO (110+ TICKERS)
 # ==========================================
 TICKERS = [
     "NVDA","MU","META","MSFT","GOOGL","AMZN","AAPL","ASML","TSM","AVGO","PLTR","PANW","VRT","AMD","NFLX","CRM","ADBE","ORCL","CSCO",
@@ -20,10 +20,10 @@ TICKERS = [
     "AVAV","GOLD","NEM","FCX","FTNT","OKTA","S","NET","ZS","CRWD","TSLA","HOOD","COIN","MSTR","DDOG","SNOW","AMAT","KLAC","LRCX"
 ]
 
-st.set_page_config(page_title="Bot Alta Convicción v1.3", layout="wide")
+st.set_page_config(page_title="Bot Alta Convicción v2.0 (5D)", layout="wide")
 
 # ==========================================
-# GENERADOR DE MANUAL PDF
+# GENERADOR DE MANUAL PDF (ACTUALIZADO 5D)
 # ==========================================
 def generar_pdf():
     buffer = io.BytesIO()
@@ -33,13 +33,12 @@ def generar_pdf():
     h1_style = ParagraphStyle('Heading1', parent=styles['Heading1'], fontSize=14, spaceBefore=15, color=colors.darkblue)
     body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10, leading=12, alignment=4)
     content = []
-    content.append(Paragraph("Manual de Usuario: Bot de Alta Convicción", title_style))
-    content.append(Paragraph("1. ¿Cómo piensa este Bot? (Explicación Coloquial)", h1_style))
-    content.append(Paragraph("<b>El Cadenero:</b> Filtra anomalías estadísticas (Z-Score).", body_style))
-    content.append(Paragraph("<b>El Termómetro:</b> Mide la probabilidad de rebote (Laplace).", body_style))
-    content.append(Paragraph("2. Reglas de Salida", h1_style))
-    data = [["Regla", "Valor"], ["Stop Loss", "-5.0%"], ["Take Profit", "+8.0%"], ["Tiempo", "10 Días"]]
-    t = Table(data, colWidths=[2*inch, 2*inch])
+    content.append(Paragraph("Manual de Usuario: Bot de Alta Convicción v2.0", title_style))
+    content.append(Paragraph("1. Filosofía de Horizonte 5-D", h1_style))
+    content.append(Paragraph("Este bot no busca el rebote de mañana. Busca la <b>Convicción Semanal</b>. Calcula la probabilidad de que en 5 días hábiles el precio sea superior al actual, filtrando el ruido del 'day-trading'.", body_style))
+    content.append(Paragraph("2. Reglas de Salida Estratégica", h1_style))
+    data = [["Regla", "Valor", "Lógica"], ["Stop Loss", "-5.0%", "Protección Capital"], ["Take Profit", "+8.0%", "Captura de Alpha"], ["Tiempo Máx", "10 Días", "Costo Oportunidad"]]
+    t = Table(data, colWidths=[1.2*inch, 1.2*inch, 2.6*inch])
     t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.darkblue),('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),('GRID',(0,0),(-1,-1),0.5,colors.grey)]))
     content.append(t)
     doc.build(content)
@@ -47,71 +46,82 @@ def generar_pdf():
     return buffer
 
 # ==========================================
-# LÓGICA DE CÁLCULO
+# CEREBRO MATEMÁTICO (HORIZONTE 5 DÍAS)
 # ==========================================
 @st.cache_data(ttl=3600)
 def descargar_datos(lista_tickers):
     data = yf.download(lista_tickers, period="2y", interval="1d", group_by='column', auto_adjust=True)
     return data['Close']
 
-def procesar_senales(precios, lista_tickers):
+def procesar_senales_5d(precios, lista_tickers):
     resultados = []
+    HORIZONTE = 5 # Cambiamos de 1 a 5 días
+    
     for t in lista_tickers:
         try:
             serie = precios[t].dropna()
             if len(serie) < 100: continue
-            ret = serie.pct_change()
-            exitos = (ret.shift(-1) > 0).astype(int).iloc[:-1]
+            
+            # --- LÓGICA DE ÉXITO SEMANAL ---
+            # Comparamos el precio de hoy contra el de hace 5 días (históricamente)
+            # Para Laplace, miramos si 'Precio en t+5' > 'Precio en t'
+            ret_5d = serie.shift(-HORIZONTE) > serie
+            exitos = ret_5d.dropna().astype(int)
+            
+            # Laplace
             p_laplace = (exitos.mean() * len(exitos) + 2) / (len(exitos) + 4)
+            
+            # Z-Score sobre la probabilidad móvil de 60 días
             p_movil = exitos.rolling(60).mean().dropna()
             z_score = (p_laplace - p_movil.mean()) / p_movil.std()
-            vol = ret.tail(20).std() * np.sqrt(252)
+            
+            # Volatilidad para Risk-Parity
+            vol = serie.pct_change().tail(20).std() * np.sqrt(252)
+            
             resultados.append({
-                "Ticker": t, "Precio": serie.iloc[-1], "Z-Score": z_score, "Prob": p_laplace, "Vol": vol
+                "Ticker": t, "Precio": serie.iloc[-1], "Z-Score": z_score, "Prob 5D": p_laplace, "Vol": vol
             })
         except: continue
     return pd.DataFrame(resultados)
 
 # ==========================================
-# INTERFAZ (UI)
+# INTERFAZ DE USUARIO
 # ==========================================
-st.sidebar.header("⚙️ Configuración")
+st.sidebar.header("⚙️ Panel de Control v2.0")
 efectivo_real = st.sidebar.number_input("Efectivo disponible ($)", value=737.63)
 z_umbral = st.sidebar.slider("Umbral de Convicción", 1.0, 2.5, 1.65)
 
 try:
-    st.sidebar.download_button("📄 Descargar Manual", data=generar_pdf(), file_name="Manual_Bot.pdf", mime="application/pdf")
+    st.sidebar.download_button("📄 Descargar Manual 5-D", data=generar_pdf(), file_name="Manual_Bot_5D.pdf", mime="application/pdf")
 except: pass
 
-st.title("🤖 Bot de Alta Convicción v1.3")
-st.markdown("**Estrategia:** Arbitraje Estadístico | **Modo:** Diagnóstico Activo")
+st.title("🤖 Bot de Alta Convicción v2.0")
+st.markdown("**Estrategia:** Weekly Mean Reversion | **Horizonte de Probabilidad:** 5 Días")
 
-if st.button("🚀 Escanear Mercado"):
-    with st.spinner("Analizando 110+ activos..."):
+if st.button("🚀 Escanear Convicción Semanal"):
+    with st.spinner("Analizando horizontes de 5 días en 110+ activos..."):
         df_precios = descargar_datos(TICKERS)
-        df_final = procesar_senales(df_precios, TICKERS)
+        df_final = procesar_senales_5d(df_precios, TICKERS)
         
-        # Lógica de Señales
+        # Clasificación
         df_final['Señal'] = np.where(df_final['Z-Score'] > z_umbral, "🔥 COMPRA FUERTE", 
-                            np.where(df_final['Prob'] > 0.60, "✅ COMPRA", 
-                            np.where(df_final['Prob'] < 0.40, "❌ VENTA", "➖ HOLD")))
+                            np.where(df_final['Prob 5D'] > 0.60, "✅ COMPRA", 
+                            np.where(df_final['Prob 5D'] < 0.40, "❌ VENTA", "➖ HOLD")))
         
-        # --- NUEVO: PANEL DE DIAGNÓSTICO ---
-        st.subheader("🕵️ Panel de Diagnóstico (Top 10 por Proximidad)")
-        st.info("Estas acciones son las que tienen mayor convicción hoy, aunque no todas lleguen al umbral.")
+        # PANEL DE DIAGNÓSTICO
+        st.subheader("🕵️ Panel de Diagnóstico Semanal (Top 10)")
         top_diagnostico = df_final.sort_values("Z-Score", ascending=False).head(10)
         st.dataframe(
-            top_diagnostico[['Ticker', 'Señal', 'Z-Score', 'Prob', 'Precio']].style.format({
-                "Z-Score": "{:.2f}", "Prob": "{:.2%}", "Precio": "${:.2f}"
+            top_diagnostico[['Ticker', 'Señal', 'Z-Score', 'Prob 5D', 'Precio']].style.format({
+                "Z-Score": "{:.2f}", "Prob 5D": "{:.2%}", "Precio": "${:.2f}"
             }), use_container_width=True
         )
         
-        # --- SECCIÓN DE EJECUCIÓN ---
+        # ÓRDENES
         compras = df_final[df_final['Señal'].str.contains("COMPRA")].copy()
-        
         if not compras.empty:
             st.divider()
-            st.subheader("💰 Órdenes de Ejecución para GBM")
+            st.subheader("💰 Órdenes Sugeridas (Horizonte 5D)")
             compras['Inversa_Vol'] = 1 / compras['Vol']
             compras['Inversión $'] = (compras['Inversa_Vol'] / compras['Inversa_Vol'].sum()) * efectivo_real
             compras['Acciones (Qty)'] = (compras['Inversión $'] / compras['Precio']).apply(np.floor)
@@ -123,7 +133,7 @@ if st.button("🚀 Escanear Mercado"):
                 use_container_width=True
             )
         else:
-            st.warning("⚠️ Sin señales oficiales. Los Z-Scores en el Panel de Diagnóstico son menores al umbral de seguridad.")
+            st.warning("⚠️ Sin señales semanales de alta convicción. El mercado no muestra memoria de rebote a 5 días.")
 
 st.markdown("---")
-st.caption(f"Última actualización: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"Actualizado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Modo: Horizonte 5-Días")
