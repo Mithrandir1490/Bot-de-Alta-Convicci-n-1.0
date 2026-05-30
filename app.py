@@ -19,11 +19,11 @@ UNIVERSO = {
     ],
     "Energía e Infraestructura": [
         "GEV", "VST", "CEG", "CCJ", "SMR", "BWXT", "NEE", "XOM", "CVX", 
-        "TPL", "NFE", "OKE", "ET", "FANG"
+        "TPL", "OKE", "ET", "FANG"
     ],
     "Fintech y Consumo Digital": [
         "MELI", "NU", "SHOP", "SQ", "PYPL", "HOOD", "COIN", "MSTR", "SE", 
-        "DLO", "UBER", "BABA", "PDD", "CPNG", "MELI", "AMZN"
+        "DLO", "UBER", "BABA", "PDD", "CPNG"
     ],
     "Salud y BioTech": [
         "LLY", "NVO", "VKTX", "UNH", "ABBV", "HIMS", "VRTX", "REGN", "OSCR", 
@@ -34,16 +34,18 @@ UNIVERSO = {
     ],
     "Defensa e Industriales": [
         "AVAV", "RKLB", "LMT", "RTX", "CAT", "DE", "GE", "ETN", "URI", 
-        "GD", "NOC", "TDG", "HON", "WM"
+        "GD", "NOC", "TDG", "HON", "WM", "KTOS"
     ],
     "Servicios y Gigantes": [
         "NFLX", "AAPL", "COST", "WMT", "JPM", "V", "MA", "TSLA", "MCO", 
-        "SPGI", "ADP", "BAC", "MS", "GS", "BLK"
+        "SPGI", "ADP", "BAC", "MS", "GS", "BLK", "CELH", "ON"
     ]
 }
 
-# Eliminar duplicados manteniendo el mapeo sectorial
 TICKERS = list(set([t for sublist in UNIVERSO.values() for t in sublist]))
+
+# PISO MÍNIMO INSTITUCIONAL POR ORDEN
+MIN_USD_PER_ORDER = 10.0
 
 st.set_page_config(page_title="Bot Alta Convicción v3.1", layout="wide", page_icon="🎯")
 
@@ -123,7 +125,8 @@ st.markdown("---")
 
 with st.sidebar:
     st.header("⚙️ Gestión de Tesorería")
-    efectivo = st.number_input("Capital Disponible para Despliegue ($)", value=1000.0, step=100.0)
+    # MEJORA: Abierto y editable para los socios. Inicializado con tu asignación táctica del 10% ($195.60)
+    presupuesto_diario_bot2 = st.number_input("Presupuesto de Despliegue Hoy (USD)", value=195.60, step=50.0)
     st.divider()
     st.info("🔮 Isengard App: Módulo de asignación blindado. Los fondos se concentran exclusivamente en anomalías de entrada, bloqueando sobrecompras.")
 
@@ -132,7 +135,7 @@ if st.button("🚀 Ejecutar Escaneo del Universo Expandido (115 Tickers)"):
         df_precios = descargar_datos_con_benchmark(TICKERS)
         df_final = procesar_senales_v3(df_precios)
         
-        # Lógica Rigurosa de Etiquetas de Acción
+        # Lógica de Etiquetas de Acción
         def asignar_accion(row):
             if row['Z-Score'] > 1.8 and row['RSI'] < 60:
                 return "🆕 NUEVA ENTRADA"
@@ -140,7 +143,7 @@ if st.button("🚀 Ejecutar Escaneo del Universo Expandido (115 Tickers)"):
                 return "✅ MANTENER (No comprar más)"
             if row['Score'] > 65 and row['RSI'] < 45:
                 return "➕ REFORZAR (Dip)"
-            return "局 HOLD"
+            return "HOLD"
 
         df_final['Acción Sugerida'] = df_final.apply(asignar_accion, axis=1)
         
@@ -167,23 +170,45 @@ if st.button("🚀 Ejecutar Escaneo del Universo Expandido (115 Tickers)"):
         st.dataframe(styled_df, use_container_width=True, height=500, hide_index=True)
         
         # ==========================================================================
-        # 💰 GESTIÓN DE CAPITAL AUTOMATIZADA (MONEY MANAGEMENT BLINDADO)
+        # 💰 GESTIÓN DE CAPITAL AUTOMATIZADA CON RESTRICCIÓN DE PISO ($10 USD)
         # ==========================================================================
         st.divider()
         st.subheader("💰 Órdenes de Ejecución de Tesorería")
         
-        # Filtrar únicamente las acciones comerciales que requieren inyección de liquidez
         compras_idx = df_final['Acción Sugerida'].isin(["🆕 NUEVA ENTRADA", "➕ REFORZAR (Dip)"])
         compras = df_final[compras_idx].copy()
+        n_compras = compras_idx.sum()
         
-        if not compras.empty:
-            # Distribución proporcional basada únicamente en la fuerza de las señales operativas activas
-            compras['Peso'] = compras['Score'] / compras['Score'].sum()
-            compras['Monto Invertir'] = compras['Peso'] * efectivo
-            compras['Acciones (Qty)'] = (compras['Monto Invertir'] / compras['Precio']).apply(np.floor)
-            compras['Porcentaje del Presupuesto'] = compras['Peso'] * 100
+        if n_compras > 0:
+            # 1. Distribución proporcional base basada en el Score compuesto
+            pesos_base = compras['Score'] / compras['Score'].sum()
+            compras['Monto Invertir'] = pesos_base * presupuesto_diario_bot2
             
-            st.success("🎯 **DISTRIBUCIÓN DE CAPITAL REFACTORIZADA (SUMA NETA = 100%):** Los fondos han sido desviados exclusivamente a zonas de descuento probabilístico.")
+            # 2. Algoritmo de optimización distributiva con piso de $10 USD
+            if presupuesto_diario_bot2 >= (n_compras * MIN_USD_PER_ORDER):
+                monto_insuficiente = True
+                while monto_insuficiente:
+                    bajo_piso = compras['Monto Invertir'] < MIN_USD_PER_ORDER
+                    
+                    if bajo_piso.any():
+                        compras.loc[bajo_piso, 'Monto Invertir'] = MIN_USD_PER_ORDER
+                        
+                        fondos_fijos = compras[compras['Monto Invertir'] == MIN_USD_PER_ORDER]['Monto Invertir'].sum()
+                        presupuesto_restante = presupuesto_diario_bot2 - fondos_fijos
+                        
+                        sobre_piso = compras['Monto Invertir'] > MIN_USD_PER_ORDER
+                        if sobre_piso.any() and presupuesto_restante > 0:
+                            compras.loc[sobre_piso, 'Monto Invertir'] = (compras.loc[sobre_piso, 'Score'] / compras.loc[sobre_piso, 'Score'].sum()) * presupuesto_restante
+                        else:
+                            monto_insuficiente = False
+                    else:
+                        monto_insuficiente = False
+
+            # Recalcular columnas de salida definitivas con el presupuesto normalizado
+            compras['Porcentaje del Presupuesto'] = (compras['Monto Invertir'] / presupuesto_diario_bot2) * 100
+            compras['Acciones (Qty)'] = (compras['Monto Invertir'] / compras['Precio']).apply(np.floor)
+            
+            st.success(f"🎯 **DISTRIBUCIÓN DE CAPITAL REFACTORIZADA (SUMA NETA = 100%):** Despliegue óptimo de los ${presupuesto_diario_bot2:.2f} USD configurados. Ninguna orden se ejecutará por debajo de los $10.00 USD mínimos.")
             
             st.table(compras[['Ticker', 'Acción Sugerida', 'Porcentaje del Presupuesto', 'Monto Invertir', 'Acciones (Qty)', 'Precio']]
                      .style.format({
@@ -193,4 +218,4 @@ if st.button("🚀 Ejecutar Escaneo del Universo Expandido (115 Tickers)"):
                          "Acciones (Qty)": "{:.0f}"
                      }))
         else:
-            st.warning("⚠️ **ALERTA DE INACCIÓN:** El mercado cotiza extendido o en rango neutral. El 100% de los líderes sectoriales están clasificados en 'MANTENER' o 'HOLD'. Queda estrictamente prohibido abrir compras adicionales hoy para proteger el precio promedio. Mantén vivas tus posiciones previas y deja correr la tendencia.")
+            st.warning(f"⚠️ **ALERTA DE INACCIÓN:** El mercado cotiza extendido o en rango neutral. El 100% de los líderes sectoriales están clasificados en 'MANTENER' o 'HOLD'. Queda estrictamente prohibido abrir compras adicionales hoy. Tu presupuesto diario de **${presupuesto_diario_bot2:.2f} USD** se retiene de forma segura y líquida en tesorería.")
